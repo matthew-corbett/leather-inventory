@@ -55,6 +55,24 @@ Set a lock password on first launch. The app asks for it on every fresh load, ha
 - **Honest limits:** this is a privacy lock, not real security. It keeps casual eyes off the app on your device — it is not encryption and not an account system. Anyone with access to this browser's stored files could read your data. The password itself is never stored anywhere, only a salted SHA-256 hash.
 - **Works from `file://` and plain `http` too:** the hash uses WebCrypto (SHA-256) when the browser provides it, and falls back to a built-in SHA-256 implementation otherwise, so the lock works the same whether you open the app from a file, a local server, or a hosted page.
 
+## Run it on your home network
+
+No hosting needed: serve it from your own computer on your own Wi-Fi, so only
+devices in your house can reach it.
+
+1. Copy this folder to the computer (e.g. your desktop).
+2. Right-click `serve-lan.ps1` → **Run with PowerShell**. (If it complains about
+   listening, right-click → **Run as administrator** once.)
+3. It prints an address like `http://192.168.1.20:8000/` — open that on your
+   phone (same Wi-Fi) and Add to Home Screen.
+4. Press `Ctrl+C` in the PowerShell window to stop it.
+
+Nothing is port-forwarded and the server binds to your LAN address only, so
+the app is not reachable from the internet. Windows Firewall may ask the
+first time — allow it on **Private** networks only. The lock screen works
+over plain `http://` on your LAN (see above), and your data still lives only
+in each browser's local storage.
+
 ## Fork it
 
 Fork freely, adapt the categories, add fields, make it yours. It's a single static page with no build step and no dependencies — `index.html`, `app.js`, `styles.css`, `demo-data.js`. Pull requests welcome.
