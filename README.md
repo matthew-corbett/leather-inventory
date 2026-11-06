@@ -46,6 +46,15 @@ A local-first inventory and product-costing app for small leather shops. Track m
   A recipe line can reference a stock item by `materialId` (costed from live inventory and deducted by "Make one") or carry a `unitCostOverride` with no stock item (estimated cost, flagged in the app). Mark anything unconfirmed with `"verified": false` and `"estimate": true` — the app surfaces both.
 - **Valuation counts materials only.** Tools, equipment, dies and patterns are tracked as shop assets and are excluded from the on-hand inventory value, so the CSV matches what a Schedule C inventory count needs.
 
+## Lock screen
+
+Set a lock password on first launch. The app asks for it on every fresh load, has a **Lock** button in the header, and locks itself after 15 minutes idle.
+
+- **Set / change:** first launch asks you to set one; change it anytime from the Data tab (needs the current password). A hint is optional and stored as plain text.
+- **Forgot password:** there is no recovery — only a salted hash is stored. Resetting (type `RESET` to confirm) wipes everything in this browser: materials, products and activity. Re-import an export backup to get your data back.
+- **Honest limits:** this is a privacy lock, not real security. It keeps casual eyes off the app on your device — it is not encryption and not an account system. Anyone with access to this browser's stored files could read your data. The password itself is never stored anywhere, only a salted SHA-256 hash.
+- **Works from `file://` and plain `http` too:** the hash uses WebCrypto (SHA-256) when the browser provides it, and falls back to a built-in SHA-256 implementation otherwise, so the lock works the same whether you open the app from a file, a local server, or a hosted page.
+
 ## Fork it
 
 Fork freely, adapt the categories, add fields, make it yours. It's a single static page with no build step and no dependencies — `index.html`, `app.js`, `styles.css`, `demo-data.js`. Pull requests welcome.

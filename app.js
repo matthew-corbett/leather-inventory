@@ -96,6 +96,305 @@ function logActivity(text) {
   state.activity = state.activity.slice(0, 200);
 }
 
+/* ---------- lock screen ----------
+   Privacy lock, not real security: anyone with this device's browser
+   files can read localStorage. Only a salted SHA-256 hash is ever stored;
+   the password itself lives only in a local variable while it is hashed,
+   and the input fields are cleared right after. */
+var LOCK_KEY = 'leather-inventory-lock-v1';
+var AUTO_LOCK_MS = 15 * 60 * 1000;
+var lockState = { set: false, record: null };
+var lockTimer = null;
+
+function b64encode(bytes) {
+  var bin = '';
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+/* SHA-256 (FIPS 180-4) over a Uint8Array, returning lowercase hex.
+   Pure-JS fallback for when WebCrypto is unavailable (plain http).
+   Verified against Node's crypto for the standard test vectors. */
+function sha256Sync(data) {
+  var K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+  var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
+  var l = data.length;
+  var totalLen = (((l + 9 + 63) >> 6) << 6);
+  var msg = new Uint8Array(totalLen);
+  msg.set(data);
+  msg[l] = 0x80;
+  var dv = new DataView(msg.buffer);
+  dv.setUint32(totalLen - 4, (l * 8) >>> 0); /* message bit length, low 32 bits (high 32 are 0 for short inputs) */
+  var W = new Array(64);
+  for (var off = 0; off < totalLen; off += 64) {
+    var t;
+    for (t = 0; t < 16; t++) W[t] = dv.getUint32(off + t * 4);
+    for (t = 16; t < 64; t++) {
+      var s0 = rotr(W[t - 15], 7) ^ rotr(W[t - 15], 18) ^ (W[t - 15] >>> 3);
+      var s1 = rotr(W[t - 2], 17) ^ rotr(W[t - 2], 19) ^ (W[t - 2] >>> 10);
+      W[t] = (W[t - 16] + s0 + W[t - 7] + s1) | 0;
+    }
+    var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (t = 0; t < 64; t++) {
+      var S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      var ch = (e & f) ^ (~e & g);
+      var temp1 = (h + S1 + ch + K[t] + W[t]) | 0;
+      var S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      var maj = (a & b) ^ (a & c) ^ (b & c);
+      var temp2 = (S0 + maj) | 0;
+      h = g; g = f; f = e; e = (d + temp1) | 0; d = c; c = b; b = a; a = (temp1 + temp2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  return H.map(function (x) { return ('00000000' + (x >>> 0).toString(16)).slice(-8); }).join('');
+}
+function sha256Hex(text) {
+  var data = new TextEncoder().encode(text);
+  if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+    return window.crypto.subtle.digest('SHA-256', data).then(function (buf) {
+      var bytes = new Uint8Array(buf);
+      var hex = '';
+      for (var i = 0; i < bytes.length; i++) hex += ('0' + bytes[i].toString(16)).slice(-2);
+      return hex;
+    });
+  }
+  return Promise.resolve(sha256Sync(data));
+}
+function newSalt() {
+  var bytes = new Uint8Array(16);
+  if (window.crypto && window.crypto.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return b64encode(bytes);
+}
+function hashPassword(pw, salt) { return sha256Hex(salt + ':' + pw); }
+function loadLock() {
+  try {
+    var raw = localStorage.getItem(LOCK_KEY);
+    if (!raw) return;
+    var rec = JSON.parse(raw);
+    if (rec && rec.salt && rec.hash) { lockState.set = true; lockState.record = rec; }
+  } catch (e) { /* no usable lock record: treat as first launch */ }
+}
+function saveLockRecord(rec) {
+  try { localStorage.setItem(LOCK_KEY, JSON.stringify(rec)); }
+  catch (e) { toast('Could not save the lock — browser storage is blocked.'); }
+}
+function showLockPanel(which) {
+  var scr = $('#lock-screen');
+  if (!scr) return;
+  scr.hidden = false;
+  document.body.classList.add('locked');
+  ['setup', 'unlock', 'forgot'].forEach(function (p) {
+    var el = $('#lock-' + p);
+    if (el) el.hidden = (p !== which);
+  });
+  var target = which === 'setup' ? $('#lock-setup-pw')
+    : which === 'unlock' ? $('#lock-unlock-pw') : $('#lock-reset-confirm');
+  if (target && target.focus) setTimeout(function () { target.focus(); }, 60);
+}
+function hideLockScreen() {
+  var scr = $('#lock-screen');
+  if (scr) scr.hidden = true;
+  document.body.classList.remove('locked');
+}
+function showLockError(sel, msg) {
+  var el = $(sel);
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+}
+function hideLockError(sel) {
+  var el = $(sel);
+  if (el) el.hidden = true;
+}
+function unlockApp() {
+  hideLockScreen();
+  startAutoLockTimer();
+  render();
+}
+function doUnlock(pw) {
+  if (!lockState.record) { unlockApp(); return Promise.resolve(true); }
+  return hashPassword(pw, lockState.record.salt).then(function (hex) {
+    if (hex === lockState.record.hash) { unlockApp(); return true; }
+    return false;
+  });
+}
+function doSetup(pw, pw2, hint) {
+  if (!pw || pw.length < 4) {
+    showLockError('#lock-setup-error', 'Choose a password of at least 4 characters.');
+    return Promise.resolve(false);
+  }
+  if (pw !== pw2) {
+    showLockError('#lock-setup-error', 'The two passwords do not match.');
+    return Promise.resolve(false);
+  }
+  var salt = newSalt();
+  return hashPassword(pw, salt).then(function (hex) {
+    var rec = { v: 1, salt: salt, hash: hex, hint: hint || '' };
+    saveLockRecord(rec);
+    lockState.set = true;
+    lockState.record = rec;
+    unlockApp();
+    toast('Lock password set.');
+    return true;
+  });
+}
+function lockNow() {
+  if (!lockState.set) return;
+  stopAutoLockTimer();
+  closeModal();
+  var hintEl = $('#lock-hint');
+  if (hintEl) {
+    if (lockState.record && lockState.record.hint) {
+      hintEl.textContent = 'Hint: ' + lockState.record.hint;
+      hintEl.hidden = false;
+    } else {
+      hintEl.hidden = true;
+    }
+  }
+  hideLockError('#lock-unlock-error');
+  var pw = $('#lock-unlock-pw');
+  if (pw) pw.value = '';
+  showLockPanel('unlock');
+}
+function wipeAllData() {
+  try { localStorage.removeItem(LS_KEY); } catch (e) {}
+  try { localStorage.removeItem(LOCK_KEY); } catch (e) {}
+  state = { version: 1, materials: [], products: [], activity: [] };
+  lockState.set = false;
+  lockState.record = null;
+  stopAutoLockTimer();
+  hideLockError('#lock-setup-error');
+  ['lock-setup-pw', 'lock-setup-pw2', 'lock-setup-hint', 'lock-reset-confirm'].forEach(function (id) {
+    var el = $('#' + id);
+    if (el) el.value = '';
+  });
+  showLockPanel('setup');
+}
+function startAutoLockTimer() {
+  stopAutoLockTimer();
+  if (!lockState.set) return;
+  lockTimer = setTimeout(function () { lockNow(); }, AUTO_LOCK_MS);
+}
+function stopAutoLockTimer() {
+  if (lockTimer) { clearTimeout(lockTimer); lockTimer = null; }
+}
+function resetAutoLockTimer() {
+  if (!lockState.set) return;
+  if (document.body.classList.contains('locked')) return;
+  startAutoLockTimer();
+}
+['pointerdown', 'keydown', 'input', 'touchstart'].forEach(function (evt) {
+  document.addEventListener(evt, resetAutoLockTimer, { passive: true });
+});
+function openChangePassword() {
+  if (!lockState.record) { toast('No lock password is set yet.'); return; }
+  openModal(
+    '<h2>Change lock password</h2>' +
+    '<form id="lock-change-form">' +
+    '<label for="lc-current">Current password</label>' +
+    '<input id="lc-current" type="password" autocomplete="current-password" required>' +
+    '<label for="lc-new">New password</label>' +
+    '<input id="lc-new" type="password" autocomplete="new-password" required minlength="4">' +
+    '<label for="lc-new2">Confirm new password</label>' +
+    '<input id="lc-new2" type="password" autocomplete="new-password" required minlength="4">' +
+    '<label for="lc-hint">Hint (optional, stored as plain text)</label>' +
+    '<input id="lc-hint" type="text" autocomplete="off" value="' + esc(lockState.record.hint || '') + '">' +
+    '<p class="lock-error" id="lc-error" hidden></p>' +
+    '<div class="modal-actions">' +
+    '<button type="submit" class="btn">Change password</button>' +
+    '<button type="button" class="btn ghost" data-action="close-modal">Cancel</button>' +
+    '</div></form>' +
+    '<p class="muted small">Only a salted hash is stored — the password itself is never saved.</p>'
+  );
+  $('#lock-change-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var current = $('#lc-current').value;
+    var next = $('#lc-new').value;
+    var next2 = $('#lc-new2').value;
+    var hint = $('#lc-hint').value.trim();
+    var errEl = $('#lc-error');
+    function fail(msg) { errEl.textContent = msg; errEl.hidden = false; }
+    if (!next || next.length < 4) { fail('Choose a new password of at least 4 characters.'); return; }
+    if (next !== next2) { fail('The new passwords do not match.'); return; }
+    hashPassword(current, lockState.record.salt).then(function (hex) {
+      if (hex !== lockState.record.hash) { fail('Current password is wrong.'); return; }
+      var salt = newSalt();
+      return hashPassword(next, salt).then(function (hex2) {
+        var rec = { v: 1, salt: salt, hash: hex2, hint: hint };
+        saveLockRecord(rec);
+        lockState.record = rec;
+        closeModal();
+        toast('Lock password changed.');
+      });
+    }).catch(function () { fail('Something went wrong — try again.'); });
+  });
+}
+function wireLockScreen() {
+  var setupForm = $('#lock-setup-form');
+  if (setupForm) setupForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    hideLockError('#lock-setup-error');
+    var pw = $('#lock-setup-pw').value;
+    var pw2 = $('#lock-setup-pw2').value;
+    var hint = $('#lock-setup-hint').value.trim();
+    doSetup(pw, pw2, hint).then(function () {
+      ['lock-setup-pw', 'lock-setup-pw2', 'lock-setup-hint'].forEach(function (id) {
+        var el = $('#' + id);
+        if (el) el.value = '';
+      });
+    });
+  });
+  var unlockForm = $('#lock-unlock-form');
+  if (unlockForm) unlockForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    hideLockError('#lock-unlock-error');
+    var btn = $('#lock-unlock-btn');
+    var pw = $('#lock-unlock-pw').value;
+    if (btn) btn.disabled = true;
+    doUnlock(pw).then(function (ok) {
+      var input = $('#lock-unlock-pw');
+      if (input) input.value = '';
+      if (ok) return;
+      showLockError('#lock-unlock-error', 'Wrong password — try again.');
+      setTimeout(function () { if (btn) btn.disabled = false; }, 1000);
+    }, function () {
+      showLockError('#lock-unlock-error', 'Something went wrong — try again.');
+      if (btn) btn.disabled = false;
+    });
+  });
+  var forgotLink = $('#lock-forgot-link');
+  if (forgotLink) forgotLink.addEventListener('click', function () {
+    hideLockError('#lock-unlock-error');
+    showLockPanel('forgot');
+  });
+  var backLink = $('#lock-back-link');
+  if (backLink) backLink.addEventListener('click', function () { showLockPanel('unlock'); });
+  var resetBtn = $('#lock-reset-btn');
+  if (resetBtn) resetBtn.addEventListener('click', function () {
+    var conf = $('#lock-reset-confirm');
+    if (!conf || conf.value.trim().toUpperCase() !== 'RESET') {
+      toast('Type RESET to confirm the wipe.');
+      if (conf) conf.focus();
+      return;
+    }
+    if (!window.confirm('This erases ALL materials, products and activity from this browser. Continue?')) return;
+    wipeAllData();
+    toast('All data erased. Set a new lock password to start over.');
+  });
+}
+
 /* ---------- toast / modal ---------- */
 function toast(msg) {
   var root = $('#toast-root');
@@ -302,6 +601,12 @@ function renderData() {
     '<div class="card">' +
       '<button class="btn secondary btn-block" data-action="load-demo">Load demo data (replaces current data)</button>' +
       '<button class="btn danger btn-block" data-action="clear-data">Clear all data</button>' +
+    '</div>' +
+    '<h3>Lock screen</h3>' +
+    '<div class="card">' +
+      '<p>This device lock keeps casual eyes off the app — a password set on this device, asked on every fresh load, with auto-lock after 15 minutes idle. It is a <strong>privacy lock, not real security</strong>: anyone with this browser’s files could read the stored data. Only a salted hash of your password is stored; the password itself is never saved.</p>' +
+      '<button class="btn secondary btn-block" data-action="change-password">Change lock password</button>' +
+      '<button class="btn secondary btn-block" data-action="lock-now">Lock now</button>' +
     '</div>' +
     '<h3>About this app</h3>' +
     '<div class="card"><p class="small">Built for small leather shops: track materials by the piece you bought them as, see what you have at the bench, cost each product from real stock prices, and export an on-hand valuation for year-end taxes. ' +
@@ -557,6 +862,8 @@ document.addEventListener('click', function (e) {
     saveState(); render(); toast('All data cleared.'); return;
   }
   if (action === 'goto-data') { setView('data'); return; }
+  if (action === 'lock-now') { lockNow(); return; }
+  if (action === 'change-password') { openChangePassword(); return; }
   if (action === 'delete-material') {
     var m = matById(t.dataset.id);
     if (m && window.confirm('Delete "' + m.name + '" from stock?')) {
@@ -594,4 +901,10 @@ $$('#tabs button').forEach(function (b) {
 
 /* ---------- init ---------- */
 loadState();
-setView('dashboard');
+loadLock();
+wireLockScreen();
+if (lockState.set) {
+  lockNow(); /* unlock panel; the app stays unrendered until unlocked */
+} else {
+  showLockPanel('setup');
+}

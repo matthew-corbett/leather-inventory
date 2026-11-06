@@ -9,8 +9,11 @@
 </head>
 <body>
 <header class="app-header">
-  <h1>🧵 Leather Inventory</h1>
-  <p>Materials · costing · stock — your data stays on this device</p>
+  <div class="header-text">
+    <h1>🧵 Leather Inventory</h1>
+    <p>Materials · costing · stock — your data stays on this device</p>
+  </div>
+  <button id="lock-btn" class="lock-btn" data-action="lock-now" aria-label="Lock the app">🔒 Lock</button>
 </header>
 
 <nav class="tabs" id="tabs" aria-label="Sections">
@@ -28,6 +31,49 @@
   <section class="view" id="view-lowstock" aria-label="Low stock"></section>
   <section class="view" id="view-data" aria-label="Data and backup"></section>
 </main>
+
+<div id="lock-screen" class="lock-screen" hidden>
+  <div class="lock-card">
+    <div class="lock-emoji" aria-hidden="true">🔒</div>
+    <h1>Leather Inventory</h1>
+
+    <div id="lock-setup" hidden>
+      <p class="lock-lede">Set a lock password for this device.</p>
+      <form id="lock-setup-form">
+        <label for="lock-setup-pw">Lock password</label>
+        <input id="lock-setup-pw" type="password" autocomplete="new-password" placeholder="At least 4 characters" required minlength="4">
+        <label for="lock-setup-pw2">Confirm password</label>
+        <input id="lock-setup-pw2" type="password" autocomplete="new-password" placeholder="Type it again" required minlength="4">
+        <label for="lock-setup-hint">Hint (optional, stored as plain text)</label>
+        <input id="lock-setup-hint" type="text" autocomplete="off" placeholder="e.g. the word on the shop sign">
+        <p class="muted small">This is a privacy lock, not real security — it keeps casual eyes off the app on this device. Only a salted hash is stored; the password itself is never saved. If you forget it, the only way back in is wiping all app data (unless you have an export backup).</p>
+        <p class="lock-error" id="lock-setup-error" hidden></p>
+        <button type="submit" class="btn btn-block">Set password &amp; unlock</button>
+      </form>
+    </div>
+
+    <div id="lock-unlock" hidden>
+      <p class="lock-lede">This app is locked on this device.</p>
+      <form id="lock-unlock-form">
+        <label for="lock-unlock-pw">Password</label>
+        <input id="lock-unlock-pw" type="password" autocomplete="current-password" placeholder="Enter your lock password" required>
+        <p class="lock-hint" id="lock-hint" hidden></p>
+        <p class="lock-error" id="lock-unlock-error" hidden>Wrong password — try again.</p>
+        <button type="submit" class="btn btn-block" id="lock-unlock-btn">Unlock</button>
+      </form>
+      <p><button type="button" class="linklike" id="lock-forgot-link">Forgot password?</button></p>
+    </div>
+
+    <div id="lock-forgot" hidden>
+      <p class="lock-lede"><strong>Forgot your password?</strong></p>
+      <p>There is no way to recover it — only a salted hash is stored. Resetting wipes <strong>everything</strong> in this browser: all materials, products and activity. The only recovery is re-importing an export backup afterwards.</p>
+      <label for="lock-reset-confirm">Type RESET to confirm</label>
+      <input id="lock-reset-confirm" type="text" autocomplete="off" placeholder="RESET">
+      <button type="button" class="btn danger btn-block" id="lock-reset-btn">Erase everything &amp; start over</button>
+      <p><button type="button" class="linklike" id="lock-back-link">Back to unlock</button></p>
+    </div>
+  </div>
+</div>
 
 <div id="modal-root"></div>
 <div id="toast-root"></div>
