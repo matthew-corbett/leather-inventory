@@ -23,6 +23,15 @@ $ErrorActionPreference = "Stop"
 
 $port = 8000
 
+# Listening on your LAN address needs administrator rights. If we're not
+# elevated, re-launch ourselves as admin so the window doesn't just vanish.
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "Requesting administrator rights (needed to listen on your network)..."
+    Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    exit
+}
+
 # Find this machine's LAN IPv4 address (skip loopback / virtual adapters best we can)
 $lanIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" -and $_.PrefixOrigin -ne "WellKnown" } |
@@ -30,6 +39,7 @@ $lanIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
 
 if (-not $lanIp) {
     Write-Host "Could not find a LAN IP address. Are you connected to Wi-Fi / Ethernet?"
+    Read-Host "Press Enter to close"
     exit 1
 }
 
@@ -43,6 +53,7 @@ try {
     Write-Host ""
     Write-Host "Could not start listening on $prefix"
     Write-Host "Right-click serve-lan.ps1 and choose 'Run as administrator', then try again."
+    Read-Host "Press Enter to close"
     exit 1
 }
 
