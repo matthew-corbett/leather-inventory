@@ -83,9 +83,10 @@ while ($listener.IsListening) {
     $path = $request.Url.LocalPath.TrimStart("/")
     if ([string]::IsNullOrEmpty($path)) { $path = "index.html" }
 
-    # Never serve anything outside this folder.
-    $fullPath = Join-Path (Get-Location) $path
-    $root = (Get-Location).Path
+    # Files live next to this script, whatever folder PowerShell started in
+    # (an elevated window starts in C:\Windows\System32, not here).
+    $root = $PSScriptRoot
+    $fullPath = Join-Path $root $path
     if (-not $fullPath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
         $response.StatusCode = 403
         $response.Close()
