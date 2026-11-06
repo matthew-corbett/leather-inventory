@@ -1,0 +1,9 @@
+# Private seed / local data files — never commit these.
+# Your real stock lives in your own seed JSON (e.g. matt-inventory-seed.json),
+# kept OUTSIDE this repo. If you keep a local copy here for convenience,
+# these patterns keep it out of git.
+*seed-private*.json
+*.local.json
+matt-inventory-seed.json
+*-private.json
+.DS_Store
